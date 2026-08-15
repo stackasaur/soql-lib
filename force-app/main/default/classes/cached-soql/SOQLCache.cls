@@ -1,8 +1,8 @@
 /**
- * Copyright (c) 2025 Beyond The Cloud Sp. z o.o. (BeyondTheCloud.Dev)
+ * Copyright (c) 2026 Beyond The Cloud Sp. z o.o. (BeyondTheCloud.Dev)
  * Licensed under the MIT License (https://github.com/beyond-the-cloud-dev/soql-lib/blob/main/LICENSE)
  *
- * v6.11.0
+ * v6.12.0
  *
  * PMD False Positives:
  * - ExcessivePublicCount: It is a library class and exposes all necessary methods to construct a query
@@ -564,22 +564,6 @@ public virtual inherited sharing class SOQLCache implements Cacheable {
             this.allowQueryWithoutConditions = true;
         }
 
-        public void validateUniqueCondition(CacheFilter filter) {
-            if (this.allowFilteringByNonUniqueFields) {
-                return;
-            }
-
-            if (
-                !(new List<String>{ 'Id', 'Name', 'DeveloperName' }.contains(filter.field) ||
-                this.additionalAllowedConditionFields.contains(filter.field) ||
-                this.isFieldUnique(filter.field))
-            ) {
-                throw new SoqlCacheException(
-                    'A cached query can be filtered only by Id, Name, DeveloperName, or a unique field. You can ignore this validation by calling allowFilteringByNonUniqueFields()'
-                );
-            }
-        }
-
         public void validateIfQueryHasAtLeastOneCondition() {
             if (!this.allowQueryWithoutConditions && this.filters.isEmpty()) {
                 throw new SoqlCacheException(
@@ -589,9 +573,25 @@ public virtual inherited sharing class SOQLCache implements Cacheable {
         }
 
         private void validateConditions() {
-            for (CacheFilter filter : this.filters) {
-                this.validateUniqueCondition(filter);
+            if (this.allowFilteringByNonUniqueFields || this.filters.isEmpty()) {
+                return;
             }
+
+            for (CacheFilter filter : this.filters) {
+                if (this.isUniqueOrAllowedConditionField(filter.field)) {
+                    return;
+                }
+            }
+
+            throw new SoqlCacheException(
+                'A cached query must have at least one condition based on Id, Name, DeveloperName, or a unique field. You can ignore this validation by calling allowFilteringByNonUniqueFields()'
+            );
+        }
+
+        private Boolean isUniqueOrAllowedConditionField(String field) {
+            return new List<String>{ 'Id', 'Name', 'DeveloperName' }.contains(field) ||
+                this.additionalAllowedConditionFields.contains(field) ||
+                this.isFieldUnique(field);
         }
 
         private Boolean isFieldUnique(String field) {
@@ -634,7 +634,7 @@ public virtual inherited sharing class SOQLCache implements Cacheable {
         }
 
         public Boolean isMatching(CacheItem cachedItem) {
-            return cachedItem.record.get(this.field) == this.value;
+            return !cachedItem.record.isSet(this.field) || cachedItem.record.get(this.field) == this.value;
         }
     }
 
