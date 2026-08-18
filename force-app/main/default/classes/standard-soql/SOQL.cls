@@ -568,6 +568,7 @@ public virtual inherited sharing class SOQL implements Queryable {
                     SELECT ClassName, ClassNamespacePrefix
                     FROM ApexTypeImplementor
                     WHERE InterfaceName = 'SOQL.Logger' AND InterfaceNamespacePrefix = :namespacePrefix AND IsConcrete = true
+                    WITH SYSTEM_MODE
                     LIMIT 1
                 ];
 

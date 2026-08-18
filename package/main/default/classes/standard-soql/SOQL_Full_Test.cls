@@ -5046,7 +5046,7 @@ private class SOQL_Full_Test {
     }
 
     static void insertTasks() {
-        insert new List<Task>{ new Task(Subject = 'Test', Type = 'Other'), new Task(Subject = 'Test', Type = 'Other') };
+        insert as system new List<Task>{ new Task(Subject = 'Test', Type = 'Other'), new Task(Subject = 'Test', Type = 'Other') };
     }
 
     @IsTest
@@ -5220,7 +5220,7 @@ private class SOQL_Full_Test {
     }
 
     static void insertTask() {
-        insert new Task(Subject = 'Test', Type = 'Other');
+        insert as system new Task(Subject = 'Test', Type = 'Other');
     }
 
     static User minimumAccessUser() {
