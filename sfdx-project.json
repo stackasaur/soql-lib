@@ -1,8 +1,8 @@
 {
   "packageDirectories": [
     {
-      "versionName": "SOQL Lib 6.10.2",
-      "versionNumber": "6.10.2.NEXT",
+      "versionName": "SOQL Lib 6.11.1",
+      "versionNumber": "6.11.1.NEXT",
       "path": "package",
       "default": true,
       "package": "SOQL Lib",
@@ -20,7 +20,7 @@
   "name": "soql-lib",
   "namespace": "btcdev",
   "sfdcLoginUrl": "https://login.salesforce.com",
-  "sourceApiVersion": "66.0",
+  "sourceApiVersion": "67.0",
   "packageAliases": {
     "SOQL Lib": "0HoP6000000010vKAA",
     "SOQL Lib@6.1.0-1": "04tP60000023Vm5IAE",
@@ -34,6 +34,8 @@
     "SOQL Lib@6.9.0-1": "04tP6000002nu1VIAQ",
     "SOQL Lib@6.10.0-1": "04tP60000036lIfIAI",
     "SOQL Lib@6.10.1-1": "04tP60000036lfFIAQ",
-    "SOQL Lib@6.10.2-1": "04tP60000038Fo9IAE"
+    "SOQL Lib@6.10.2-1": "04tP60000038Fo9IAE",
+    "SOQL Lib@6.11.0-1": "04tP6000003MO5BIAW",
+    "SOQL Lib@6.11.1-1": "04tP6000003On13IAC"
   }
 }

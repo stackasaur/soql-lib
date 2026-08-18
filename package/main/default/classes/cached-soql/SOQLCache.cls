@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Beyond The Cloud Sp. z o.o. (BeyondTheCloud.Dev)
  * Licensed under the MIT License (https://github.com/beyond-the-cloud-dev/soql-lib/blob/main/LICENSE)
  *
- * v6.11.0
+ * v6.12.0
  *
  * PMD False Positives:
  * - ExcessivePublicCount: It is a library class and exposes all necessary methods to construct a query
@@ -323,12 +323,26 @@ global virtual inherited sharing class SOQLCache implements Cacheable {
         private CacheManager.Cacheable storage = CacheManager.ApexTransaction;
         private String cacheKey;
 
+        public List<CacheItem> cachedItems {
+            get {
+                if (cachedItems == null) {
+                    cachedItems = this.getCachedRecords();
+                }
+                return cachedItems;
+            }
+            private set;
+        }
+
         public CacheStorageProxy(String ofObject) {
             this.cacheKey = this.getAlphanumericKeyFromObjectApiName(ofObject);
         }
 
         private String getAlphanumericKeyFromObjectApiName(String ofObject) {
             return Pattern.compile('[^a-zA-Z0-9]').matcher(ofObject).replaceAll('');
+        }
+
+        private List<CacheItem> getCachedRecords() {
+            return (List<CacheItem>) (this.storage.get(this.cacheKey) ?? new List<CacheItem>());
         }
 
         public CacheStorageProxy apexTransaction() {
@@ -364,12 +378,8 @@ global virtual inherited sharing class SOQLCache implements Cacheable {
             return this.storage.contains(this.cacheKey);
         }
 
-        public List<CacheItem> getCachedRecords() {
-            return (List<CacheItem>) (this.storage.get(this.cacheKey) ?? new List<CacheItem>());
-        }
-
         public void addRecordsToCache(List<SObject> recordsToAdd) {
-            List<CacheItem> allCachedRecords = getCachedRecords();
+            List<CacheItem> allCachedRecords = cachedItems;
 
             for (SObject databaseRecord : recordsToAdd) {
                 allCachedRecords.add(new CacheItem(databaseRecord));
@@ -379,7 +389,7 @@ global virtual inherited sharing class SOQLCache implements Cacheable {
         }
 
         public void updateRecordsInCache(List<SObject> recordsToUpdate) {
-            List<CacheItem> allCachedRecords = getCachedRecords();
+            List<CacheItem> allCachedRecords = cachedItems;
 
             Map<Id, SObject> updatedRecordsById = new Map<Id, SObject>(recordsToUpdate);
 
@@ -398,7 +408,7 @@ global virtual inherited sharing class SOQLCache implements Cacheable {
 
             List<CacheItem> filteredCachedItems = new List<CacheItem>();
 
-            for (CacheItem cachedRecord : getCachedRecords()) {
+            for (CacheItem cachedRecord : cachedItems) {
                 if (!recordsToRemoveIds.contains(cachedRecord.id)) {
                     filteredCachedItems.add(cachedRecord);
                 }
@@ -424,7 +434,7 @@ global virtual inherited sharing class SOQLCache implements Cacheable {
         private List<CacheItem> cachedItemsThatMeetCriteria {
             get {
                 if (this.cachedItemsThatMeetCriteria == null) {
-                    this.cachedItemsThatMeetCriteria = this.filterGroup.filter(this.storage.getCachedRecords());
+                    this.cachedItemsThatMeetCriteria = this.filterGroup.filter(this.storage.cachedItems);
                 }
                 return this.cachedItemsThatMeetCriteria;
             }
@@ -509,22 +519,6 @@ global virtual inherited sharing class SOQLCache implements Cacheable {
             this.allowQueryWithoutConditions = true;
         }
 
-        public void validateUniqueCondition(CacheFilter filter) {
-            if (this.allowFilteringByNonUniqueFields) {
-                return;
-            }
-
-            if (
-                !(new List<String>{ 'Id', 'Name', 'DeveloperName' }.contains(filter.field) ||
-                this.additionalAllowedConditionFields.contains(filter.field) ||
-                this.isFieldUnique(filter.field))
-            ) {
-                throw new SoqlCacheException(
-                    'A cached query can be filtered only by Id, Name, DeveloperName, or a unique field. You can ignore this validation by calling allowFilteringByNonUniqueFields()'
-                );
-            }
-        }
-
         public void validateIfQueryHasAtLeastOneCondition() {
             if (!this.allowQueryWithoutConditions && this.filters.isEmpty()) {
                 throw new SoqlCacheException(
@@ -534,9 +528,25 @@ global virtual inherited sharing class SOQLCache implements Cacheable {
         }
 
         private void validateConditions() {
-            for (CacheFilter filter : this.filters) {
-                this.validateUniqueCondition(filter);
+            if (this.allowFilteringByNonUniqueFields || this.filters.isEmpty()) {
+                return;
             }
+
+            for (CacheFilter filter : this.filters) {
+                if (this.isUniqueOrAllowedConditionField(filter.field)) {
+                    return;
+                }
+            }
+
+            throw new SoqlCacheException(
+                'A cached query must have at least one condition based on Id, Name, DeveloperName, or a unique field. You can ignore this validation by calling allowFilteringByNonUniqueFields()'
+            );
+        }
+
+        private Boolean isUniqueOrAllowedConditionField(String field) {
+            return new List<String>{ 'Id', 'Name', 'DeveloperName' }.contains(field) ||
+                this.additionalAllowedConditionFields.contains(field) ||
+                this.isFieldUnique(field);
         }
 
         private Boolean isFieldUnique(String field) {
@@ -579,7 +589,7 @@ global virtual inherited sharing class SOQLCache implements Cacheable {
         }
 
         public Boolean isMatching(CacheItem cachedItem) {
-            return cachedItem.record.get(this.field) == this.value;
+            return !cachedItem.record.isSet(this.field) || cachedItem.record.get(this.field) == this.value;
         }
     }
 

@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Beyond The Cloud Sp. z o.o. (BeyondTheCloud.Dev)
  * Licensed under the MIT License (https://github.com/beyond-the-cloud-dev/soql-lib/blob/main/LICENSE)
  *
- * v6.11.0
+ * v6.12.0
  *
  * PMD False Positives:
  * - ExcessivePublicCount: It is a library class and exposes all necessary methods to construct a query
@@ -130,6 +130,7 @@ global virtual inherited sharing class SOQL implements Queryable {
         Queryable orderBy(String field, String direction);
         Queryable orderBy(String relationshipName, SObjectField field);
         Queryable orderByCount(SObjectField field);
+        Queryable orderBy(Distance distance);
         Queryable sortDesc();
         Queryable sort(String direction);
         Queryable nullsLast();
@@ -211,6 +212,11 @@ global virtual inherited sharing class SOQL implements Queryable {
         SubQuery with(SObjectField field1, SObjectField field2, SObjectField field3, SObjectField field4, SObjectField field5);
         SubQuery with(Iterable<SObjectField> fields);
         SubQuery with(String fields);
+        SubQuery with(String relationshipName, SObjectField field);
+        SubQuery with(String relationshipName, SObjectField field1, SObjectField field2);
+        SubQuery with(String relationshipName, SObjectField field1, SObjectField field2, SObjectField field3);
+        SubQuery with(String relationshipName, SObjectField field1, SObjectField field2, SObjectField field3, SObjectField field4);
+        SubQuery with(String relationshipName, SObjectField field1, SObjectField field2, SObjectField field3, SObjectField field4, SObjectField field5);
         SubQuery with(String relationshipName, Iterable<SObjectField> fields);
         SubQuery with(SubQuery subQuery);
         SubQuery toLabel(SObjectField field);
@@ -225,6 +231,7 @@ global virtual inherited sharing class SOQL implements Queryable {
         SubQuery orderBy(SObjectField field);
         SubQuery orderBy(String field);
         SubQuery orderBy(String relationshipName, SObjectField field);
+        SubQuery orderBy(Distance distance);
         SubQuery sortDesc();
         SubQuery sort(String direction);
         SubQuery nullsLast();
@@ -263,6 +270,7 @@ global virtual inherited sharing class SOQL implements Queryable {
         Filter with(SObjectField field);
         Filter with(String field);
         Filter with(String relationshipName, SObjectField field);
+        Filter with(Distance distance);
         // COMPARATORS
         Filter isNull();
         Filter isNotNull();
@@ -381,6 +389,29 @@ global virtual inherited sharing class SOQL implements Queryable {
         Map<String, Object> getPopulatedFieldsAsMap();
     }
 
+    global interface Distance {
+        // field
+        Distance of(SObjectField ofField);
+        Distance of(String relationship, SObjectField ofField);
+        // comparison
+        Distance between(System.Location location);
+        Distance between(Decimal latitude, Decimal longitude);
+        // unit
+        Distance mi();
+        Distance km();
+    }
+
+    global interface Logger {
+        void log(Error error);
+    }
+
+    global interface Error {
+        Exception getException();
+        String getQuery();
+        Map<String, Object> getBinding();
+        AccessLevel getAccessLevel();
+    }
+
     global static SubQuery SubQuery {
         get {
             return new SoqlSubQuery();
@@ -420,6 +451,12 @@ global virtual inherited sharing class SOQL implements Queryable {
     global static DataCategoryFilter DataCategoryFilter {
         get {
             return new SoqlDataCategoryFilter();
+        }
+    }
+
+    global static Distance Distance {
+        get {
+            return new SoqlDistance();
         }
     }
 
@@ -491,7 +528,33 @@ global virtual inherited sharing class SOQL implements Queryable {
     private static Binder binder = new Binder();
     private static Integer syncQueriesIssued = 0;
 
-    private SoqlBuilder builder;
+    @TestVisible
+    private static Logger queryLogger {
+        get {
+            if (queryLogger == null) {
+                String className = SOQL.class.getName(); // 'SOQL' or 'btcdev.SOQL' when namespaced
+                String namespacePrefix = className.contains('.') ? className.substringBefore('.') : null;
+
+                List<ApexTypeImplementor> implementors = [
+                    SELECT ClassName, ClassNamespacePrefix
+                    FROM ApexTypeImplementor
+                    WHERE InterfaceName = 'SOQL.Logger' AND InterfaceNamespacePrefix = :namespacePrefix AND IsConcrete = true
+                    WITH SYSTEM_MODE
+                    LIMIT 1
+                ];
+
+                if (!implementors.isEmpty()) {
+                    Object loggerInstance = Type.forName(implementors[0].ClassNamespacePrefix, implementors[0].ClassName)?.newInstance();
+                    queryLogger = loggerInstance instanceof Logger ? (Logger) loggerInstance : null;
+                }
+            }
+
+            return queryLogger;
+        }
+        private set;
+    }
+
+    private Builder builder;
     private Executor executor;
     private Converter converter;
 
@@ -500,7 +563,7 @@ global virtual inherited sharing class SOQL implements Queryable {
     }
 
     global SOQL(String ofObject) {
-        this.builder = new SoqlBuilder(ofObject);
+        this.builder = new Builder(ofObject);
         this.executor = new Executor(builder);
         this.converter = new Converter(ofObject);
 
@@ -896,6 +959,11 @@ global virtual inherited sharing class SOQL implements Queryable {
         return this.orderBy('COUNT(' + field.toString() + ')');
     }
 
+    global Queryable orderBy(Distance distance) {
+        this.builder.orderBys.newOrderBy().with(distance);
+        return this;
+    }
+
     global Queryable sortDesc() {
         return this.sort('DESC');
     }
@@ -1187,10 +1255,10 @@ global virtual inherited sharing class SOQL implements Queryable {
         String toString();
     }
 
-    private class SoqlBuilder implements QueryClause {
+    private class Builder implements QueryClause {
         private List<QueryClause> clauses = new QueryClause[12];
 
-        public SoqlBuilder(String ofObject) {
+        public Builder(String ofObject) {
             this.clauses.set(0, new SoqlFields(ofObject));
             this.clauses.set(2, new SoqlFrom(ofObject));
         }
@@ -1493,11 +1561,11 @@ global virtual inherited sharing class SOQL implements Queryable {
     }
 
     private class SoqlSubQuery implements SubQuery {
-        private SoqlBuilder builder;
+        private Builder builder;
         private String childRelationshipName;
 
         public SubQuery of(String ofObject) {
-            this.builder = new SoqlBuilder(ofObject);
+            this.builder = new Builder(ofObject);
             this.childRelationshipName = ofObject;
             return this;
         }
@@ -1531,6 +1599,26 @@ global virtual inherited sharing class SOQL implements Queryable {
         public SubQuery with(String fields) {
             this.builder.fields.with(fields);
             return this;
+        }
+
+        public SubQuery with(String relationshipName, SObjectField field) {
+            return this.with(relationshipName, new List<SObjectField>{ field });
+        }
+
+        public SubQuery with(String relationshipName, SObjectField field1, SObjectField field2) {
+            return this.with(relationshipName, new List<SObjectField>{ field1, field2 });
+        }
+
+        public SubQuery with(String relationshipName, SObjectField field1, SObjectField field2, SObjectField field3) {
+            return this.with(relationshipName, new List<SObjectField>{ field1, field2, field3 });
+        }
+
+        public SubQuery with(String relationshipName, SObjectField field1, SObjectField field2, SObjectField field3, SObjectField field4) {
+            return this.with(relationshipName, new List<SObjectField>{ field1, field2, field3, field4 });
+        }
+
+        public SubQuery with(String relationshipName, SObjectField field1, SObjectField field2, SObjectField field3, SObjectField field4, SObjectField field5) {
+            return this.with(relationshipName, new List<SObjectField>{ field1, field2, field3, field4, field5 });
         }
 
         public SubQuery with(String relationshipName, Iterable<SObjectField> fields) {
@@ -1593,6 +1681,11 @@ global virtual inherited sharing class SOQL implements Queryable {
 
         public SubQuery orderBy(String relationshipName, SObjectField field) {
             this.builder.orderBys.newOrderBy().with(relationshipName + '.' + field.toString());
+            return this;
+        }
+
+        public SubQuery orderBy(Distance distance) {
+            this.builder.orderBys.newOrderBy().with(distance);
             return this;
         }
 
@@ -1893,6 +1986,11 @@ global virtual inherited sharing class SOQL implements Queryable {
             return this;
         }
 
+        public Filter with(Distance distance) {
+            this.field = distance.toString();
+            return this;
+        }
+
         public Filter isNull() {
             return this.equal(null);
         }
@@ -2160,10 +2258,10 @@ global virtual inherited sharing class SOQL implements Queryable {
     }
 
     private class SoqlJoinQuery implements InnerJoin {
-        private SoqlBuilder builder;
+        private Builder builder;
 
         public InnerJoin of(SObjectType ofObject) {
-            this.builder = new SoqlBuilder(ofObject.toString());
+            this.builder = new Builder(ofObject.toString());
             return this;
         }
 
@@ -2485,6 +2583,10 @@ global virtual inherited sharing class SOQL implements Queryable {
             this.orderField = field;
         }
 
+        public void with(Distance distance) {
+            this.orderField = distance.toString();
+        }
+
         public void sortingOrder(String direction) {
             this.sortingOrder = direction;
         }
@@ -2781,6 +2883,48 @@ global virtual inherited sharing class SOQL implements Queryable {
         }
     }
 
+    private class SoqlDistance implements Distance {
+        private String field;
+        private String unit = 'km';
+        private String comparisonLocation;
+
+        public Distance of(SObjectField ofField) {
+            this.field = ofField.toString();
+            return this;
+        }
+
+        public Distance of(String relationship, SObjectField ofField) {
+            this.field = relationship + '.' + ofField.toString();
+            return this;
+        }
+
+        public Distance between(System.Location location) {
+            this.comparisonLocation = 'GEOLOCATION(' + location.getLatitude() + ',' + location.getLongitude() + ')';
+            return this;
+        }
+
+        public Distance between(Decimal latitude, Decimal longitude) {
+            return this.between(Location.newInstance(latitude, longitude));
+        }
+
+        public Distance mi() {
+            return this.unit('mi');
+        }
+
+        public Distance km() {
+            return this.unit('km');
+        }
+
+        private Distance unit(String unit) {
+            this.unit = unit;
+            return this;
+        }
+
+        public override String toString() {
+            return 'DISTANCE(' + this.field + ', ' + this.comparisonLocation + ',\' ' + this.unit + '\')';
+        }
+    }
+
     private class ExceptionMock {
         private QueryException queryException;
 
@@ -2793,14 +2937,37 @@ global virtual inherited sharing class SOQL implements Queryable {
         }
     }
 
+    private class SoqlError implements Error {
+        public Exception queryException;
+        public String query;
+        public Map<String, Object> binding;
+        public AccessLevel accessLevel;
+
+        public Exception getException() {
+            return this.queryException;
+        }
+
+        public String getQuery() {
+            return this.query;
+        }
+
+        public Map<String, Object> getBinding() {
+            return this.binding;
+        }
+
+        public AccessLevel getAccessLevel() {
+            return this.accessLevel;
+        }
+    }
+
     private inherited sharing class Executor {
         private DatabaseQuery sharingExecutor;
         private AccessLevel accessMode;
         private AccessType accessType;
-        private SoqlBuilder builder;
+        private Builder builder;
         private List<SoqlMock> mocks = new List<SoqlMock>();
 
-        public Executor(SoqlBuilder builder) {
+        public Executor(Builder builder) {
             this.builder = builder;
             this.accessMode = AccessLevel.USER_MODE;
             this.sharingExecutor = new InheritedSharing();
@@ -2848,12 +3015,19 @@ global virtual inherited sharing class SOQL implements Queryable {
                 return this.getMockedListProxy();
             }
 
-            if (this.accessType == null) {
-                return this.sharingExecutor.toSObjects(this.builder.toString(), binder.getBindingMap(), this.accessMode);
-            }
+            String query = this.builder.toString();
 
-            return System.Security.stripInaccessible(this.accessType, this.sharingExecutor.toSObjects(this.builder.toString(), binder.getBindingMap(), this.accessMode))
-                .getRecords();
+            try {
+                if (this.accessType == null) {
+                    return this.sharingExecutor.toSObjects(query, binder.getBindingMap(), this.accessMode);
+                }
+
+                return System.Security.stripInaccessible(this.accessType, this.sharingExecutor.toSObjects(query, binder.getBindingMap(), this.accessMode))
+                    .getRecords();
+            } catch (Exception e) {
+                this.logError(e, query);
+                throw e;
+            }
         }
 
         private void throwExceptionMockIfExists() {
@@ -2876,12 +3050,19 @@ global virtual inherited sharing class SOQL implements Queryable {
                 return this.getMockedAggregatedResult(fieldToExtract);
             }
 
-            if (this.accessType == null) {
-                return this.sharingExecutor.toSObjects(this.builder.toString(), binder.getBindingMap(), this.accessMode);
-            }
+            String query = this.builder.toString();
 
-            return System.Security.stripInaccessible(this.accessType, this.sharingExecutor.toSObjects(this.builder.toString(), binder.getBindingMap(), this.accessMode))
-                .getRecords();
+            try {
+                if (this.accessType == null) {
+                    return this.sharingExecutor.toSObjects(query, binder.getBindingMap(), this.accessMode);
+                }
+
+                return System.Security.stripInaccessible(this.accessType, this.sharingExecutor.toSObjects(query, binder.getBindingMap(), this.accessMode))
+                    .getRecords();
+            } catch (Exception e) {
+                this.logError(e, query);
+                throw e;
+            }
         }
 
         private List<AggregateResult> getMockedAggregatedResult(String fieldToExtract) {
@@ -2917,7 +3098,14 @@ global virtual inherited sharing class SOQL implements Queryable {
                 return this.getMockedCount();
             }
 
-            return this.sharingExecutor.toInteger(this.builder.toString(), binder.getBindingMap(), this.accessMode);
+            String query = this.builder.toString();
+
+            try {
+                return this.sharingExecutor.toInteger(query, binder.getBindingMap(), this.accessMode);
+            } catch (Exception e) {
+                this.logError(e, query);
+                throw e;
+            }
         }
 
         private Integer getMockedCount() {
@@ -2929,17 +3117,56 @@ global virtual inherited sharing class SOQL implements Queryable {
 
         public Database.QueryLocator toQueryLocator() {
             this.incrementQueryIssued();
-            return this.sharingExecutor.toQueryLocator(this.builder.toString(), binder.getBindingMap(), this.accessMode);
+
+            String query = this.builder.toString();
+
+            try {
+                return this.sharingExecutor.toQueryLocator(query, binder.getBindingMap(), this.accessMode);
+            } catch (Exception e) {
+                this.logError(e, query);
+                throw e;
+            }
         }
 
         public Database.Cursor toCursor() {
             this.incrementQueryIssued();
-            return sharingExecutor.toCursor(builder.toString(), binder.getBindingMap(), accessMode);
+
+            String query = this.builder.toString();
+
+            try {
+                return this.sharingExecutor.toCursor(query, binder.getBindingMap(), this.accessMode);
+            } catch (Exception e) {
+                this.logError(e, query);
+                throw e;
+            }
         }
 
         public Database.PaginationCursor toPaginationCursor() {
             this.incrementQueryIssued();
-            return this.sharingExecutor.toPaginationCursor(this.builder.toString(), binder.getBindingMap(), this.accessMode);
+
+            String query = this.builder.toString();
+
+            try {
+                return this.sharingExecutor.toPaginationCursor(query, binder.getBindingMap(), this.accessMode);
+            } catch (Exception e) {
+                this.logError(e, query);
+                throw e;
+            }
+        }
+
+        private void logError(Exception e, String query) {
+            if (SOQL.queryLogger == null) {
+                return;
+            }
+
+            SoqlError queryError = new SoqlError();
+
+            queryError.queryException = e;
+            queryError.query = query;
+            queryError.binding = binder.getBindingMap();
+            queryError.accessLevel = this.accessMode;
+
+            SOQL.queryLogger.log(queryError);
         }
 
         private void incrementQueryIssued() {

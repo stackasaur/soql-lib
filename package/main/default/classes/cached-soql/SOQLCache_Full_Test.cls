@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Beyond The Cloud Sp. z o.o. (BeyondTheCloud.Dev)
  * Licensed under the MIT License (https://github.com/beyond-the-cloud-dev/soql-lib/blob/main/LICENSE)
  *
- * v6.11.0
+ * v6.12.0
  *
  * PMD False Positives:
  * - CyclomaticComplexity: It is a library and we tried to put everything into ONE test class
@@ -599,12 +599,129 @@ private class SOQLCache_Full_Test {
         }
 
         // Verify
-        Assert.isNotNull(soqlException, 'An exception should be thrown when the field is not Id, Name, DeveloperName, or a unique field.');
+        Assert.isNotNull(soqlException, 'An exception should be thrown when no condition is based on Id, Name, DeveloperName, or a unique field.');
         Assert.areEqual(
-            'A cached query can be filtered only by Id, Name, DeveloperName, or a unique field. You can ignore this validation by calling allowFilteringByNonUniqueFields()',
+            'A cached query must have at least one condition based on Id, Name, DeveloperName, or a unique field. You can ignore this validation by calling allowFilteringByNonUniqueFields()',
             soqlException.getMessage(),
-            'The exception message should be "A cached query can be filtered only by Id, Name, DeveloperName, or a unique field."'
+            'The exception message should be "A cached query must have at least one condition based on Id, Name, DeveloperName, or a unique field."'
         );
+    }
+
+    @IsTest
+    static void whereEqualMultipleNotUniqueFields() {
+        // Setup
+        SOQLCache.SoqlCacheException soqlException;
+
+        // Test
+        try {
+            SOQLCache.of(Profile.SObjectType)
+                .with(Profile.Id, Profile.Name)
+                .whereEqual(Profile.UserType, 'Standard')
+                .whereEqual(Profile.Description, 'Test')
+                .toObject();
+        } catch (SOQLCache.SoqlCacheException e) {
+            soqlException = e;
+        }
+
+        // Verify
+        Assert.isNotNull(soqlException, 'An exception should be thrown when none of the conditions is based on a unique field.');
+        Assert.areEqual(
+            'A cached query must have at least one condition based on Id, Name, DeveloperName, or a unique field. You can ignore this validation by calling allowFilteringByNonUniqueFields()',
+            soqlException.getMessage(),
+            'The exception message should be "A cached query must have at least one condition based on Id, Name, DeveloperName, or a unique field."'
+        );
+    }
+
+    @IsTest
+    static void whereEqualNotUniqueFieldCombinedWithUniqueField() {
+        // Setup
+        SOQLCache.SoqlCacheException soqlException;
+
+        // Test
+        try {
+            SOQLCache.of(Profile.SObjectType)
+                .with(Profile.Id, Profile.Name)
+                .whereEqual(Profile.UserType, 'Standard')
+                .whereEqual(Profile.Name, SYSTEM_ADMINISTRATOR)
+                .toObject();
+        } catch (SOQLCache.SoqlCacheException e) {
+            soqlException = e;
+        }
+
+        // Verify
+        Assert.isNull(soqlException, 'An exception should not be thrown when at least one condition is based on a unique field.');
+    }
+
+    @IsTest
+    static void whereEqualNotUniqueFieldWhenCachedRecordIsMissingConditionField() {
+        // Setup
+        // The first query caches the record without the UserType field.
+        SOQLCache.of(Profile.SObjectType).with(Profile.Id, Profile.Name).whereEqual(Profile.Name, SYSTEM_ADMINISTRATOR).toObject();
+
+        // Test
+        Profile profile = (Profile) SOQLCache.of(Profile.SObjectType)
+            .with(Profile.Id, Profile.Name, Profile.UserType)
+            .whereEqual(Profile.Name, SYSTEM_ADMINISTRATOR)
+            .whereEqual(Profile.UserType, 'Standard')
+            .toObject();
+
+        // Verify
+        Assert.areEqual('Standard', profile.UserType, 'The record should be refreshed from the database with the missing UserType field.');
+        Assert.areEqual(2, Limits.getQueries(), 'The second query should be executed, because the cached record does not have the UserType field.');
+    }
+
+    @IsTest
+    static void whereEqualNotUniqueFieldWhenConditionValueDoesNotMatch() {
+        // Setup
+        // The first query caches the record without the UserType field.
+        SOQLCache.of(Profile.SObjectType).with(Profile.Id, Profile.Name).whereEqual(Profile.Name, SYSTEM_ADMINISTRATOR).toObject();
+
+        // Test
+        Profile profile = (Profile) SOQLCache.of(Profile.SObjectType)
+            .with(Profile.Id, Profile.Name, Profile.UserType)
+            .whereEqual(Profile.Name, SYSTEM_ADMINISTRATOR)
+            .whereEqual(Profile.UserType, 'PowerPartner')
+            .toObject();
+
+        // Verify
+        Assert.isNull(profile, 'No record should be returned, because the database value does not match the condition.');
+        Assert.areEqual(2, Limits.getQueries(), 'The second query should be executed, because the cached record does not have the UserType field.');
+    }
+
+    @IsTest
+    static void whereEqualNotUniqueFieldWithAllowFilteringByNonUniqueFields() {
+        // Setup
+        SOQLCache.SoqlCacheException soqlException;
+
+        // Test
+        try {
+            SOQLCache.of(Profile.SObjectType)
+                .with(Profile.Id, Profile.Name)
+                .allowFilteringByNonUniqueFields()
+                .whereEqual(Profile.UserType, 'NonExistingType')
+                .toObject();
+        } catch (SOQLCache.SoqlCacheException e) {
+            soqlException = e;
+        }
+
+        // Verify
+        Assert.isNull(soqlException, 'An exception should not be thrown when allowFilteringByNonUniqueFields() is called.');
+    }
+
+    @IsTest
+    static void whereEqualNotUniqueFieldCombinedWithAdditionalAllowedConditionField() {
+        // Setup
+        SOQLCache.SoqlCacheException soqlException;
+
+        // Test
+        try {
+            new SOQL_UserCache().whereEqual(User.Username, 'test@test.com').whereEqual(User.UserType, 'Standard').toObject();
+        } catch (SOQLCache.SoqlCacheException e) {
+            soqlException = e;
+        }
+
+        // Verify
+        Assert.isNull(soqlException, 'An exception should not be thrown when at least one condition is based on an additional allowed condition field.');
     }
 
     @IsTest
